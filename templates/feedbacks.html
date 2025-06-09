@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>최근 피드백</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 2em;
+            background-color: #f4f4f4;
+        }
+        .card {
+            background: white;
+            padding: 1em;
+            margin-bottom: 1em;
+            border-radius: 8px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
+        .title {
+            font-weight: bold;
+            margin-bottom: 0.4em;
+        }
+    </style>
+</head>
+<body>
+    <h1>🗂 최근 피드백 기록</h1>
+
+    {% for fb in feedbacks %}
+        <div class="card">
+            <div class="title">{{ fb.title }}</div>
+            🙋 피드백: {{ fb.feedback }}<br>
+            🕒 시각: {{ fb.timestamp.strftime('%Y-%m-%d %H:%M') }}
+        </div>
+    {% endfor %}
+</body>
+</html>
