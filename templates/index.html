@@ -62,7 +62,9 @@
             display: inline-block;
             padding: 4px 8px;
             color: #495057;
-            border: 1px solid transparent;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: white;
         }
         .news-event[data-event="실적"] { background-color: #e3f2fd; }
         .news-event[data-event="주가/투자"] { background-color: #e8f5e9; }
@@ -84,12 +86,12 @@
             background: white;
             color: #495057;
             border: 1px solid #dee2e6;
+            border-radius: 4px;
         }
         .news-time {
             display: inline-block;
             padding: 4px 8px;
-            background: #f8f9fa;
-            border-radius: 4px;
+            background: white;
             color: #868e96;
         }
         .feedback-btns {
@@ -152,20 +154,17 @@
 <body>
     <h1>뉴스 딜리버리</h1>
     <form method="get" action="/" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
-        <label for="sector">산업군:</label>
         <select name="sector" id="sector" onchange="this.form.submit()">
-            <option value="">전체</option>
+            <option value="">산업군 전체</option>
             {% for sector in sectors %}
-                <option value="{{ sector }}" {% if sector == selected_sector %}selected{% endif %}>{{ sector }}</option>
+            <option value="{{ sector }}" {% if sector == selected_sector %}selected{% endif %}>{{ sector }}</option>
             {% endfor %}
         </select>
-        <label for="keyword">키워드:</label>
-        <input type="text" name="keyword" id="keyword" value="{{ keyword }}" placeholder="예: 반도체" style="padding: 4px 8px;"/>
+        <input type="text" name="keyword" id="keyword" value="{{ keyword }}" placeholder="키워드 입력" style="padding: 4px 8px;"/>
         <button type="submit">검색</button>
     </form>
-    <div class="info-message">
-        <span>•</span>
-        <span>카드를 클릭하면 해당 기사의 원문을 새 탭에서 볼 수 있습니다.</span>
+    <div style="text-align: right; margin-bottom: 20px; color: #666; font-size: 0.9em;">
+        뉴스카드를 클릭하면 기사 원문으로 연결됩니다.
     </div>
     <div class="news-list">
         {% for item in news %}
@@ -173,9 +172,9 @@
             <a href="{{ item.url }}" target="_blank" class="news-item">
                 <div class="news-title">{{ item.title }}</div>
                 <div class="news-meta">
-                    <span class="news-company">🏢 {{ item.companies|join(', ') }}</span>
-                    <span class="news-event" data-event="{{ item.event }}">📌 {{ item.event }}</span>
-                    <span class="news-time">⏰ {{ item.published.strftime('%Y-%m-%d %H:%M') }}</span>
+                    <span class="news-company">{{ item.companies|join(', ') }}</span>
+                    <span class="news-event" data-event="{{ item.event }}">{{ item.event }}</span>
+                    <span class="news-time">{{ item.published.strftime('%m/%d %H:%M') }}</span>
                 </div>
             </a>
             <div class="feedback-btns">
