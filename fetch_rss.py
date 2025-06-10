@@ -14,6 +14,7 @@ db = client["stock_alert"]
 
 # ✅ 한글 뉴스 중심 RSS 피드
 RSS_FEEDS = {
+    # 경제/금융/증권/산업/IT/제조/바이오/유통 등 다양한 언론사와 전문지
     "조선비즈": "https://biz.chosun.com/rss.xml",
     "머니투데이": "https://news.mt.co.kr/mtview/rss.htm",
     "한국경제": "https://www.hankyung.com/feed/news",
@@ -29,9 +30,23 @@ RSS_FEEDS = {
     "파이낸셜뉴스": "https://www.fnnews.com/rss/fn_realnews_finance.xml",
     "헤럴드경제": "https://biz.heraldcorp.com/common/rss_xml.php?ct=010000000000",
     "MTN": "https://news.mtn.co.kr/newscenter/rss/news.xml",
-
+    "한국투자증권": "https://www.koreainvestment.com/rss/news.xml",
+    "NH투자증권": "https://www.nhqv.com/rss/news.xml",
+    "KB증권": "https://www.kbsec.com/rss/news.xml",
+    "신한투자증권": "https://www.shinhan.com/rss/news.xml",
+    "디지털데일리": "https://www.digitaldaily.co.kr/rss/news.xml",
+    "테크M": "https://www.techm.kr/rss/news.xml",
+    "아이뉴스24": "https://www.inews24.com/rss/news.xml",
+    "바이오스펙테이터": "https://www.biospectator.com/rss/news.xml",
+    "팜뉴스": "https://www.pharmnews.com/rss/allArticle.xml",
+    "식품저널": "https://www.foodnews.co.kr/rss/allArticle.xml",
+    "파이낸셜뉴스 산업": "https://www.fnnews.com/rss/fn_industry.xml",
+    "전자신문 산업": "https://rss.etnews.com/ETnews_industry.xml",
+    # ... (여기에 더 많은 피드 추가 가능)
     # 영어 피드 (AI 분석 제외)
-    "Yahoo Finance": "https://finance.yahoo.com/news/rssindex"
+    "Yahoo Finance": "https://finance.yahoo.com/news/rssindex",
+    "Bloomberg": "https://www.bloomberg.com/feeds/sitemap_news.xml",
+    "Reuters": "https://www.reutersagency.com/feed/"
 }
 
 def parse_and_store(feed_url, source_name):
@@ -143,6 +158,16 @@ def parse_and_store(feed_url, source_name):
                             if f"{company} 주가" in title or f"{company} 실적" in title or f"{company} 매출" in title:
                                 print(f"[DEBUG] 기업 관련 키워드 발견: {company}, 기업 추가: {company}")
                                 companies.append(company)
+                
+                # 5. 주가/실적 관련 키워드가 있는 경우
+                if not companies:  # 이전 매칭이 모두 없을 경우
+                    stock_keywords = ["주가", "실적", "매출", "영업이익", "순이익", "배당", "주주", "주식", "증권", "투자", "M&A", "인수", "합병"]
+                    for keyword in stock_keywords:
+                        if keyword in title:
+                            print(f"[DEBUG] 주가/실적 관련 키워드 발견: {keyword}")
+                            # 해당 키워드가 있는 뉴스는 기업 관련 뉴스로 간주
+                            companies = ["기타기업"]
+                            break
                 
                 if companies:
                     print(f"[DEBUG] 추출된 기업: {companies}")

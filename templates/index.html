@@ -3,25 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>주식 알림 서비스</title>
+    <title>뉴스 딜리버리</title>
     <style>
         body {
             font-family: 'Noto Sans KR', sans-serif;
             max-width: 800px;
             margin: 0 auto;
             padding: 20px;
-            background-color: #f5f5f5;
+            background-color: #f8f9fa;
+            color: #333;
         }
         .info-message {
-            background: #e3f2fd;
+            background: #f1f3f5;
             padding: 12px 20px;
             border-radius: 8px;
             margin-bottom: 20px;
-            color: #1565c0;
+            color: #495057;
             font-size: 0.95em;
             display: flex;
             align-items: center;
             gap: 8px;
+            border-left: 4px solid #868e96;
         }
         .news-item-wrapper {
             position: relative;
@@ -31,26 +33,27 @@
             padding: 20px;
             margin-bottom: 15px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             transition: transform 0.2s, box-shadow 0.2s;
             cursor: pointer;
             text-decoration: none;
             color: inherit;
             display: block;
+            border: 1px solid #e9ecef;
         }
         .news-item:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         .news-title {
             font-size: 1.2em;
-            font-weight: bold;
+            font-weight: 500;
             margin-bottom: 10px;
-            color: #333;
+            color: #212529;
         }
         .news-meta {
             font-size: 0.9em;
-            color: #666;
+            color: #495057;
             display: flex;
             align-items: center;
             gap: 8px;
@@ -58,20 +61,36 @@
         .news-event {
             display: inline-block;
             padding: 4px 8px;
-            background: #e3f2fd;
-            border-radius: 4px;
+            color: #495057;
+            border: 1px solid transparent;
         }
+        .news-event[data-event="실적"] { background-color: #e3f2fd; }
+        .news-event[data-event="주가/투자"] { background-color: #e8f5e9; }
+        .news-event[data-event="신규사업"] { background-color: #fff3e0; }
+        .news-event[data-event="M&A/인수"] { background-color: #f3e5f5; }
+        .news-event[data-event="리스크"] { background-color: #ffebee; }
+        .news-event[data-event="정책/규제"] { background-color: #e8eaf6; }
+        .news-event[data-event="기술/특허"] { background-color: #e0f7fa; }
+        .news-event[data-event="채용/인사"] { background-color: #f1f8e9; }
+        .news-event[data-event="파트너십"] { background-color: #fce4ec; }
+        .news-event[data-event="시설/공장"] { background-color: #f3e5f5; }
+        .news-event[data-event="배당/환원"] { background-color: #e8f5e9; }
+        .news-event[data-event="ESG/환경"] { background-color: #e0f2f1; }
+        .news-event[data-event="해외진출"] { background-color: #fff3e0; }
+        .news-event[data-event="기타"] { background-color: #f5f5f5; }
         .news-company {
             display: inline-block;
             padding: 4px 8px;
-            background: #f3e5f5;
-            border-radius: 4px;
+            background: white;
+            color: #495057;
+            border: 1px solid #dee2e6;
         }
         .news-time {
             display: inline-block;
             padding: 4px 8px;
-            background: #f5f5f5;
+            background: #f8f9fa;
             border-radius: 4px;
+            color: #868e96;
         }
         .feedback-btns {
             position: absolute;
@@ -82,35 +101,70 @@
             z-index: 2;
         }
         .feedback-btn {
-            background: #e0e0e0;
+            background: transparent;
             border: none;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
+            width: 32px;
+            height: 32px;
             cursor: pointer;
-            font-size: 1.3em;
+            font-size: 1.2em;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: background 0.2s;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.07);
+            transition: all 0.2s;
+            color: #495057;
         }
         .feedback-btn:hover {
-            background: #bdbdbd;
+            color: #212529;
         }
         .feedback-msg {
             margin-top: 6px;
-            color: #388e3c;
+            color: #495057;
             font-size: 0.95em;
             text-align: right;
             padding-right: 12px;
         }
+        select, input[type="text"] {
+            padding: 6px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: white;
+            color: #495057;
+        }
+        button[type="submit"] {
+            padding: 6px 16px;
+            background: #495057;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button[type="submit"]:hover {
+            background: #343a40;
+        }
+        h1 {
+            color: #212529;
+            font-weight: 500;
+            margin-bottom: 24px;
+        }
     </style>
 </head>
 <body>
-    <h1>주식 알림 서비스</h1>
+    <h1>뉴스 딜리버리</h1>
+    <form method="get" action="/" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+        <label for="sector">산업군:</label>
+        <select name="sector" id="sector" onchange="this.form.submit()">
+            <option value="">전체</option>
+            {% for sector in sectors %}
+                <option value="{{ sector }}" {% if sector == selected_sector %}selected{% endif %}>{{ sector }}</option>
+            {% endfor %}
+        </select>
+        <label for="keyword">키워드:</label>
+        <input type="text" name="keyword" id="keyword" value="{{ keyword }}" placeholder="예: 반도체" style="padding: 4px 8px;"/>
+        <button type="submit">검색</button>
+    </form>
     <div class="info-message">
-        <span>💡</span>
+        <span>•</span>
         <span>카드를 클릭하면 해당 기사의 원문을 새 탭에서 볼 수 있습니다.</span>
     </div>
     <div class="news-list">
@@ -120,13 +174,13 @@
                 <div class="news-title">{{ item.title }}</div>
                 <div class="news-meta">
                     <span class="news-company">🏢 {{ item.companies|join(', ') }}</span>
-                    <span class="news-event">📌 {{ item.event }}</span>
+                    <span class="news-event" data-event="{{ item.event }}">📌 {{ item.event }}</span>
                     <span class="news-time">⏰ {{ item.published.strftime('%Y-%m-%d %H:%M') }}</span>
                 </div>
             </a>
             <div class="feedback-btns">
-                <button class="feedback-btn" title="유용해요" onclick="sendFeedback('{{ item._id }}', 'like', this)">👍</button>
-                <button class="feedback-btn" title="별로예요" onclick="sendFeedback('{{ item._id }}', 'dislike', this)">👎</button>
+                <button class="feedback-btn" title="유용해요" onclick="sendFeedback('{{ item._id }}', 'like', this)">✓</button>
+                <button class="feedback-btn" title="별로예요" onclick="sendFeedback('{{ item._id }}', 'dislike', this)">✕</button>
             </div>
             <div class="feedback-msg" style="display:none;"></div>
         </div>
@@ -145,7 +199,7 @@
         .then(data => {
             if (data.status === 'success') {
                 const msgDiv = btn.parentElement.nextElementSibling;
-                msgDiv.textContent = '피드백이 저장되었습니다!';
+                msgDiv.textContent = '피드백이 저장되었습니다.';
                 msgDiv.style.display = 'block';
                 btn.parentElement.style.display = 'none';
             } else {

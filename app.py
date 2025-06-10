@@ -24,20 +24,29 @@ with open("sector_mapping.json", "r", encoding="utf-8") as f:
 # 유니크한 산업군 리스트
 sectors = sorted(list(set(SECTOR_MAP.values())))
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def index():
     try:
-        # 1. 먼저 기업 정보가 있는 뉴스를 가져옴
-        news = list(db.news.find({
-            "companies": {"$exists": True, "$ne": []}
-        }).sort("published", -1))
+        selected_sector = request.args.get("sector", "")
+        keyword = request.args.get("keyword", "")
+        
+        # 1. 기업 정보가 있는 뉴스만 가져옴
+        query = {"companies": {"$exists": True, "$ne": []}}
+        if selected_sector:
+            query["companies"] = {"$in": [c for c, s in SECTOR_MAP.items() if s == selected_sector]}
+        news = list(db.news.find(query).sort("published", -1))
+        
+        # 2. 키워드 필터링
+        if keyword:
+            news = [item for item in news if keyword in item["title"]]
         
         # 2. 기업 정보가 없는 뉴스 중에서 한국어 뉴스를 가져와서 기업 정보 추출
         if len(news) < 10:  # 기업 정보가 있는 뉴스가 10개 미만인 경우
+            # 더 많은 뉴스를 가져오도록 limit 증가
             additional_news = list(db.news.find({
                 "lang": "ko",
                 "companies": {"$exists": False}  # companies 필드가 없는 경우
-            }).sort("published", -1).limit(20))  # 최대 20개까지 가져옴
+            }).sort("published", -1).limit(50))  # 50개까지 가져옴
             
             for item in additional_news:
                 # 기업명 추출
@@ -56,6 +65,10 @@ def index():
                             "analyzed": True
                         }}
                     )
+                
+                # 10개 이상이면 중단
+                if len(news) >= 10:
+                    break
         
         print(f"[DEBUG] 가져온 뉴스 수: {len(news)}")
         print(f"[DEBUG] 전체 뉴스 수: {db.news.count_documents({})}")
@@ -68,10 +81,9 @@ def index():
         for item in news:
             item['_id'] = str(item['_id'])  # ObjectId를 문자열로 변환
             item['published'] = item['published'].replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=9)))
-            # URL이 없는 경우 기본값 설정
-            if 'url' not in item:
-                item['url'] = '#'
-        return render_template("index.html", news=news)
+            # link 필드를 url로 매핑
+            item['url'] = item.get('link', '#')
+        return render_template("index.html", news=news, sectors=sectors, selected_sector=selected_sector, keyword=keyword)
     except Exception as e:
         print(f"[ERROR] {str(e)}")
         return str(e), 500
