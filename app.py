@@ -10,6 +10,7 @@ import json
 import feedparser
 from langdetect import detect
 import subprocess
+import sys
 
 from models.ner import extract_companies
 from models.event_classifier import classify_event
@@ -79,12 +80,23 @@ def get_elapsed_time(published_time):
 def index():
     try:
         # 서버가 실행 중인지 확인하고 필요시 시작
-        result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
-        if '8000' not in result.stdout:
-            subprocess.Popen(['python', 'start_server.py'], 
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-            return "서버를 시작합니다. 잠시 후 다시 시도해주세요.", 503
+        if sys.platform == 'win32':
+            result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
+            if '8000' not in result.stdout:
+                # 서버 시작
+                python_exe = sys.executable
+                subprocess.Popen([python_exe, 'app.py'], 
+                               creationflags=subprocess.CREATE_NEW_CONSOLE,
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+                return "서버를 시작합니다. 잠시 후 다시 시도해주세요.", 503
+        else:
+            result = subprocess.run(['lsof', '-i', ':8000'], capture_output=True, text=True)
+            if not result.stdout:
+                subprocess.Popen(['python3', 'app.py'],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+                return "서버를 시작합니다. 잠시 후 다시 시도해주세요.", 503
 
         selected_sector = request.args.get("sector", "")
         keyword = request.args.get("keyword", "")
@@ -294,4 +306,4 @@ if __name__ == "__main__":
     threading.Thread(target=open_browser).start()
     
     # 서버 시작
-    app.run(debug=True, port=8000, use_reloader=False)
+    app.run(host='0.0.0.0', port=8000, debug=True, use_reloader=False)
