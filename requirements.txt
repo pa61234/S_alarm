@@ -1,0 +1,14 @@
+Flask==2.3.3
+pymongo==4.7.1
+python-dotenv==1.0.1
+feedparser==6.0.10
+langdetect==1.0.9
+gunicorn==22.0.0
+APScheduler==3.10.1
+Dangam==0.0.137
+lingua-language-detector==1.2.1
+python-dateutil
+pytz==2024.1
+torch==2.1.0
+transformers==4.35.0
+sentencepiece==0.1.99 

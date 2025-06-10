@@ -10,6 +10,7 @@ import json
 
 from models.ner import extract_companies
 from models.event_classifier import classify_event
+from models.sentiment_analyzer import sentiment_analyzer
 
 load_dotenv()
 client = MongoClient(os.getenv("MONGO_URI"))
@@ -23,6 +24,22 @@ with open("sector_mapping.json", "r", encoding="utf-8") as f:
 
 # 유니크한 산업군 리스트
 sectors = sorted(list(set(SECTOR_MAP.values())))
+
+def get_elapsed_time(published_time):
+    """뉴스 게시 시간으로부터의 경과시간을 계산"""
+    now = datetime.now(timezone(timedelta(hours=9)))
+    diff = now - published_time
+    
+    if diff.days > 0:
+        return '+1day'
+    elif diff.seconds >= 21600:  # 6시간
+        return '+6hours'
+    elif diff.seconds >= 10800:  # 3시간
+        return '+3hours'
+    elif diff.seconds >= 3600:  # 1시간
+        return '+1hour'
+    else:
+        return 'New'
 
 @app.route("/", methods=["GET"])
 def index():
@@ -54,6 +71,7 @@ def index():
                 if companies:  # 기업명이 추출된 경우에만 추가
                     item['companies'] = companies
                     item['event'] = classify_event(item['title'])
+                    item['sentiment'] = sentiment_analyzer.analyze(item['title'])
                     news.append(item)
                     
                     # DB에 업데이트
@@ -62,6 +80,7 @@ def index():
                         {"$set": {
                             "companies": companies,
                             "event": item['event'],
+                            "sentiment": item['sentiment'],
                             "analyzed": True
                         }}
                     )
@@ -87,6 +106,10 @@ def index():
                 item['published'] = item['published'].astimezone(timezone(timedelta(hours=9)))
             # link 필드를 url로 매핑
             item['url'] = item.get('link', '#')
+            # 경과시간 계산
+            item['elapsed_time'] = get_elapsed_time(item['published'])
+            # 감성분석 결과 추가
+            item['sentiment'] = item.get('sentiment', 'unknown')
         return render_template("index.html", news=news, sectors=sectors, selected_sector=selected_sector, keyword=keyword)
     except Exception as e:
         print(f"[ERROR] {str(e)}")
