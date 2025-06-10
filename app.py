@@ -80,7 +80,11 @@ def index():
             
         for item in news:
             item['_id'] = str(item['_id'])  # ObjectId를 문자열로 변환
-            item['published'] = item['published'].replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=9)))
+            # published를 KST로 변환
+            if item['published'].tzinfo is None:
+                item['published'] = item['published'].replace(tzinfo=timezone(timedelta(hours=9)))
+            elif item['published'].tzinfo.utcoffset(item['published']) != timedelta(hours=9):
+                item['published'] = item['published'].astimezone(timezone(timedelta(hours=9)))
             # link 필드를 url로 매핑
             item['url'] = item.get('link', '#')
         return render_template("index.html", news=news, sectors=sectors, selected_sector=selected_sector, keyword=keyword)

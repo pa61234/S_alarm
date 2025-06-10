@@ -4,7 +4,7 @@ import feedparser
 from pymongo import MongoClient
 from dotenv import load_dotenv
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from langdetect import detect
 from ai_server_client import analyze_news  # AI 서버 연동 함수
 
@@ -54,12 +54,37 @@ def parse_and_store(feed_url, source_name):
     for entry in feed.entries:
         title = entry.title
         link = entry.link
+        
+        # 시간 파싱 로직 개선
         published = entry.get("published", "")
-        try:
-            published_dt = datetime.strptime(published, "%a, %d %b %Y %H:%M:%S %Z")
-        except:
-            published_dt = datetime.utcnow()
-
+        published_dt = None
+        
+        # 다양한 시간 형식 처리
+        time_formats = [
+            "%a, %d %b %Y %H:%M:%S %z",  # RFC 822 형식 (예: "Wed, 10 Jun 2025 10:55:15 +0900")
+            "%a, %d %b %Y %H:%M:%S %Z",  # RFC 822 형식 (예: "Wed, 10 Jun 2025 10:55:15 KST")
+            "%Y-%m-%dT%H:%M:%S%z",       # ISO 8601 형식 (예: "2025-06-10T10:55:15+09:00")
+            "%Y-%m-%d %H:%M:%S",         # 기본 형식 (예: "2025-06-10 10:55:15")
+        ]
+        
+        for fmt in time_formats:
+            try:
+                published_dt = datetime.strptime(published, fmt)
+                # 시간대가 없는 경우 KST로 설정
+                if published_dt.tzinfo is None:
+                    published_dt = published_dt.replace(tzinfo=timezone(timedelta(hours=9)))
+                # 시간대가 KST가 아니면 KST로 변환
+                elif published_dt.tzinfo.utcoffset(published_dt) != timedelta(hours=9):
+                    published_dt = published_dt.astimezone(timezone(timedelta(hours=9)))
+                break
+            except ValueError:
+                continue
+        
+        # 시간 파싱 실패 시 현재 시간 사용
+        if not published_dt:
+            print(f"[WARNING] 시간 파싱 실패: {published}, 현재 시간으로 대체")
+            published_dt = datetime.now(timezone(timedelta(hours=9)))
+        
         # 중복 확인
         if db.news.find_one({"title": title, "source": source_name}):
             continue
