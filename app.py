@@ -192,24 +192,28 @@ def index():
             }).sort("published", -1).limit(50))
             
             for item in additional_news:
-                # 기업명 추출
-                companies = extract_companies(item['title'])
-                if companies:  # 기업명이 추출된 경우에만 추가
-                    item['companies'] = companies
-                    item['event'] = classify_event(item['title'])
-                    item['sentiment'] = sentiment_analyzer.analyze(item['title'])
-                    news.append(item)
-                    
-                    # DB에 업데이트
-                    db.news.update_one(
-                        {"_id": item['_id']},
-                        {"$set": {
-                            "companies": companies,
-                            "event": item['event'],
-                            "sentiment": item['sentiment'],
-                            "analyzed": True
-                        }}
-                    )
+                try:
+                    # 기업명 추출
+                    companies = extract_companies(item['title'])
+                    if companies:  # 기업명이 추출된 경우에만 추가
+                        item['companies'] = companies
+                        item['event'] = classify_event(item['title'])
+                        item['sentiment'] = sentiment_analyzer.analyze(item['title'])
+                        news.append(item)
+                        
+                        # DB에 업데이트
+                        db.news.update_one(
+                            {"_id": item['_id']},
+                            {"$set": {
+                                "companies": companies,
+                                "event": item['event'],
+                                "sentiment": item['sentiment'],
+                                "analyzed": True
+                            }}
+                        )
+                except Exception as e:
+                    print(f"[ERROR] 뉴스 분석 실패: {item['title']} - {str(e)}")
+                    continue
                 
                 # 10개 이상이면 중단
                 if len(news) >= 10:
@@ -224,22 +228,28 @@ def index():
             print(f"[DEBUG] 뉴스: {n['title']} | {n.get('lang', 'unknown')} | {n.get('companies', [])}")
             
         for item in news:
-            item['_id'] = str(item['_id'])  # ObjectId를 문자열로 변환
-            # published를 KST로 변환
-            if item['published'].tzinfo is None:
-                item['published'] = item['published'].replace(tzinfo=timezone(timedelta(hours=9)))
-            elif item['published'].tzinfo.utcoffset(item['published']) != timedelta(hours=9):
-                item['published'] = item['published'].astimezone(timezone(timedelta(hours=9)))
-            # link 필드를 url로 매핑
-            item['url'] = item.get('link', '#')
-            # 경과시간 계산
-            item['elapsed_time'] = get_elapsed_time(item['published'])
-            # 감성분석 결과 추가
-            item['sentiment'] = item.get('sentiment', 'unknown')
+            try:
+                item['_id'] = str(item['_id'])  # ObjectId를 문자열로 변환
+                # published를 KST로 변환
+                if item['published'].tzinfo is None:
+                    item['published'] = item['published'].replace(tzinfo=timezone(timedelta(hours=9)))
+                elif item['published'].tzinfo.utcoffset(item['published']) != timedelta(hours=9):
+                    item['published'] = item['published'].astimezone(timezone(timedelta(hours=9)))
+                # link 필드를 url로 매핑
+                item['url'] = item.get('link', '#')
+                # 경과시간 계산
+                item['elapsed_time'] = get_elapsed_time(item['published'])
+                # 감성분석 결과 추가
+                item['sentiment'] = item.get('sentiment', 'unknown')
+            except Exception as e:
+                print(f"[ERROR] 뉴스 데이터 처리 실패: {item.get('title', 'unknown')} - {str(e)}")
+                continue
+
         return render_template("index.html", news=news, sectors=sectors, selected_sector=selected_sector, keyword=keyword)
     except Exception as e:
-        print(f"[ERROR] {str(e)}")
-        return str(e), 500
+        error_msg = f"페이지 로딩 중 오류 발생: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return error_msg, 500
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
@@ -248,7 +258,7 @@ def analyze():
     title = data.get("title")
 
     if not news_id or not title:
-        return jsonify({"status": "error", "message": "invalid input"}), 400
+        return jsonify({"status": "error", "message": "뉴스 ID와 제목이 필요합니다"}), 400
 
     try:
         companies = extract_companies(title)
@@ -271,10 +281,11 @@ def analyze():
             }}
         )
 
-        return jsonify({"status": "success"})
+        return jsonify({"status": "success", "message": "뉴스 분석이 완료되었습니다"})
     except Exception as e:
-        print(f"[ERROR] 분석 실패: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        error_msg = f"뉴스 분석 실패: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return jsonify({"status": "error", "message": error_msg}), 500
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
@@ -283,15 +294,19 @@ def feedback():
     feedback = data.get("feedback")
 
     if not news_id or not feedback:
-        return jsonify({"status": "error", "message": "invalid input"}), 400
+        return jsonify({"status": "error", "message": "뉴스 ID와 피드백이 필요합니다"}), 400
 
-    db.feedback.insert_one({
-        "news_id": ObjectId(news_id),
-        "feedback": feedback,
-        "timestamp": datetime.utcnow()
-    })
-
-    return jsonify({"status": "success"})
+    try:
+        db.feedback.insert_one({
+            "news_id": ObjectId(news_id),
+            "feedback": feedback,
+            "timestamp": datetime.utcnow()
+        })
+        return jsonify({"status": "success", "message": "피드백이 저장되었습니다"})
+    except Exception as e:
+        error_msg = f"피드백 저장 실패: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return jsonify({"status": "error", "message": error_msg}), 500
 
 if __name__ == "__main__":
     import threading
