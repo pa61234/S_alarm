@@ -101,12 +101,12 @@
             border: 1px solid;
         }
         .news-sentiment[data-sentiment="positive"] { 
-            background-color: #1976d2; 
-            border-color: #1565c0;
-        }
-        .news-sentiment[data-sentiment="negative"] { 
             background-color: #d32f2f; 
             border-color: #c62828;
+        }
+        .news-sentiment[data-sentiment="negative"] { 
+            background-color: #1976d2; 
+            border-color: #1565c0;
         }
         .news-sentiment[data-sentiment="neutral"] { 
             background-color: #757575; 
@@ -153,6 +153,12 @@
         }
         .feedback-btn:hover {
             color: #212529;
+        }
+        .feedback-btn[title="유용해요"] {
+            color: #d32f2f;
+        }
+        .feedback-btn[title="유용해요"]:hover {
+            color: #b71c1c;
         }
         .feedback-msg {
             margin-top: 6px;
