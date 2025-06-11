@@ -1,57 +1,39 @@
 # S_alarm/app.py
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session
 from pymongo import MongoClient
 from dotenv import load_dotenv
 import os
 from bson import ObjectId
 from datetime import datetime, timezone, timedelta
 import json
-import feedparser
-from langdetect import detect
 import subprocess
 import sys
+import uuid
+import logging
+from logging.handlers import RotatingFileHandler
+import re
 
 from models.ner import extract_companies
 from models.event_classifier import classify_event
 from models.sentiment_analyzer import sentiment_analyzer
+from models.news_collector import NaverNewsCollector
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+handler = RotatingFileHandler('app.log', maxBytes=10000000, backupCount=5)
+handler.setFormatter(logging.Formatter(
+    '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
+))
+logger.addHandler(handler)
 
 load_dotenv()
 client = MongoClient(os.getenv("MONGO_URI"))
 db = client["stock_alert"]
 
 app = Flask(__name__)
-
-# RSS 피드 목록
-RSS_FEEDS = {
-    "조선비즈": "https://biz.chosun.com/rss.xml",
-    "머니투데이": "https://news.mt.co.kr/mtview/rss.htm",
-    "한국경제": "https://www.hankyung.com/feed/news",
-    "서울경제": "https://www.sedaily.com/rss/Finance.xml",
-    "매일경제": "https://www.mk.co.kr/rss/30000001/",
-    "아시아경제": "https://www.asiae.co.kr/rss/news.xml",
-    "이데일리": "https://rss.edaily.co.kr/rss/Sec_list.xml",
-    "전자신문": "https://rss.etnews.com/ETnews.xml",
-    "ZDNet Korea": "https://zdnet.co.kr/news/news.xml",
-    "디지털타임스": "https://www.dt.co.kr/rss/news.xml",
-    "연합뉴스": "https://www.yna.co.kr/news/rss",
-    "KDI뉴스": "https://www.kdi.re.kr/rss/kdi_news.xml",
-    "파이낸셜뉴스": "https://www.fnnews.com/rss/fn_realnews_finance.xml",
-    "헤럴드경제": "https://biz.heraldcorp.com/common/rss_xml.php?ct=010000000000",
-    "MTN": "https://news.mtn.co.kr/newscenter/rss/news.xml",
-    "한국투자증권": "https://www.koreainvestment.com/rss/news.xml",
-    "NH투자증권": "https://www.nhqv.com/rss/news.xml",
-    "KB증권": "https://www.kbsec.com/rss/news.xml",
-    "신한투자증권": "https://www.shinhan.com/rss/news.xml",
-    "디지털데일리": "https://www.digitaldaily.co.kr/rss/news.xml",
-    "테크M": "https://www.techm.kr/rss/news.xml",
-    "아이뉴스24": "https://www.inews24.com/rss/news.xml",
-    "바이오스펙테이터": "https://www.biospectator.com/rss/news.xml",
-    "팜뉴스": "https://www.pharmnews.com/rss/allArticle.xml",
-    "식품저널": "https://www.foodnews.co.kr/rss/allArticle.xml",
-    "파이낸셜뉴스 산업": "https://www.fnnews.com/rss/fn_industry.xml",
-    "전자신문 산업": "https://rss.etnews.com/ETnews_industry.xml"
-}
+app.secret_key = os.urandom(24)  # 세션을 위한 시크릿 키
 
 # 산업군 매핑 로드 (앱 시작 시 1회만)
 with open("sector_mapping.json", "r", encoding="utf-8") as f:
@@ -60,9 +42,38 @@ with open("sector_mapping.json", "r", encoding="utf-8") as f:
 # 유니크한 산업군 리스트
 sectors = sorted(list(set(SECTOR_MAP.values())))
 
+# 뉴스 캐시를 저장할 전역 변수
+news_cache = {}
+CACHE_EXPIRY = timedelta(hours=1)  # 캐시 만료 시간
+
+def cleanup_expired_cache():
+    """만료된 캐시를 정리하는 함수"""
+    now = datetime.now()
+    expired_sessions = []
+    
+    for session_id, cache_data in news_cache.items():
+        if 'last_accessed' not in cache_data:
+            expired_sessions.append(session_id)
+            continue
+            
+        if now - cache_data['last_accessed'] > CACHE_EXPIRY:
+            expired_sessions.append(session_id)
+    
+    for session_id in expired_sessions:
+        del news_cache[session_id]
+        logger.info(f"만료된 캐시 정리: {session_id}")
+
 def get_elapsed_time(published_time):
     """뉴스 게시 시간으로부터의 경과시간을 계산"""
-    now = datetime.now(timezone(timedelta(hours=9)))
+    now = datetime.now(timezone(timedelta(hours=9)))  # KST 기준 현재 시간
+    
+    # published_time이 naive datetime인 경우 KST로 변환
+    if published_time.tzinfo is None:
+        published_time = published_time.replace(tzinfo=timezone(timedelta(hours=9)))
+    # published_time이 다른 timezone인 경우 KST로 변환
+    elif published_time.tzinfo.utcoffset(published_time) != timedelta(hours=9):
+        published_time = published_time.astimezone(timezone(timedelta(hours=9)))
+    
     diff = now - published_time
     
     if diff.days > 0:
@@ -76,6 +87,67 @@ def get_elapsed_time(published_time):
     else:
         return 'New'
 
+def clean_html_tags(text):
+    """HTML 태그를 제거하는 함수"""
+    if not text:
+        return text
+    # <b> 태그 제거
+    text = re.sub(r'<b>|</b>', '', text)
+    # 다른 HTML 태그도 제거
+    text = re.sub(r'<[^>]+>', '', text)
+    return text
+
+def prepare_news(query, skip=0, limit=30):
+    """뉴스를 준비하는 함수"""
+    try:
+        # 스포츠 관련 키워드
+        sports_keywords = ['스포츠', '축구', '야구', '농구', '골프', '테니스', '올림픽', '월드컵', 'K리그', 'KBO', 'KBL']
+        
+        # DB에서 뉴스 가져오기
+        news = list(db.news.find(query).sort("published", -1).skip(skip).limit(limit * 2))  # 스포츠 뉴스 제외를 위해 더 많은 뉴스를 가져옴
+        
+        # 데이터 처리
+        processed_news = []
+        for item in news:
+            try:
+                # 스포츠 뉴스 제외
+                title = item.get('title', '')
+                if any(keyword in title for keyword in sports_keywords):
+                    continue
+                
+                item['_id'] = str(item['_id'])
+                
+                # 시간 처리
+                published_time = item['published']
+                if published_time.tzinfo is None:
+                    # UTC 시간을 KST로 변환
+                    published_time = published_time.replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=9)))
+                elif published_time.tzinfo.utcoffset(published_time) != timedelta(hours=9):
+                    # 다른 timezone을 KST로 변환
+                    published_time = published_time.astimezone(timezone(timedelta(hours=9)))
+                
+                item['published'] = published_time
+                item['url'] = item.get('link', '#')
+                item['elapsed_time'] = get_elapsed_time(published_time)
+                item['sentiment'] = item.get('sentiment', 'unknown')
+                # HTML 태그 제거
+                item['title'] = clean_html_tags(title)
+                
+                processed_news.append(item)
+                
+                # 필요한 만큼의 뉴스만 처리
+                if len(processed_news) >= limit:
+                    break
+                    
+            except Exception as e:
+                logger.error(f"뉴스 데이터 처리 실패: {item.get('title', 'unknown')} - {str(e)}", exc_info=True)
+                continue
+        
+        return processed_news
+    except Exception as e:
+        logger.error(f"뉴스 준비 중 오류 발생: {str(e)}", exc_info=True)
+        raise
+
 @app.route("/", methods=["GET"])
 def index():
     try:
@@ -83,7 +155,6 @@ def index():
         if sys.platform == 'win32':
             result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True)
             if '8000' not in result.stdout:
-                # 서버 시작
                 python_exe = sys.executable
                 subprocess.Popen([python_exe, 'app.py'], 
                                creationflags=subprocess.CREATE_NEW_CONSOLE,
@@ -102,154 +173,85 @@ def index():
         keyword = request.args.get("keyword", "")
         
         # 새로운 뉴스 수집
-        print("🔄 새로운 뉴스 수집 시작...")
-        for source_name, feed_url in RSS_FEEDS.items():
-            try:
-                feed = feedparser.parse(feed_url)
-                for entry in feed.entries:
-                    title = entry.title
-                    link = entry.link
-                    
-                    # 중복 확인
-                    if db.news.find_one({"title": title, "source": source_name}):
-                        continue
-                    
-                    # 시간 파싱
-                    published = entry.get("published", "")
-                    published_dt = None
-                    
-                    # 다양한 시간 형식 처리
-                    time_formats = [
-                        "%a, %d %b %Y %H:%M:%S %z",
-                        "%a, %d %b %Y %H:%M:%S %Z",
-                        "%Y-%m-%dT%H:%M:%S%z",
-                        "%Y-%m-%d %H:%M:%S",
-                    ]
-                    
-                    for fmt in time_formats:
-                        try:
-                            published_dt = datetime.strptime(published, fmt)
-                            if published_dt.tzinfo is None:
-                                published_dt = published_dt.replace(tzinfo=timezone(timedelta(hours=9)))
-                            elif published_dt.tzinfo.utcoffset(published_dt) != timedelta(hours=9):
-                                published_dt = published_dt.astimezone(timezone(timedelta(hours=9)))
-                            break
-                        except ValueError:
-                            continue
-                    
-                    if not published_dt:
-                        published_dt = datetime.now(timezone(timedelta(hours=9)))
-                    
-                    # 언어 감지
-                    try:
-                        lang = detect(title)
-                    except:
-                        lang = "unknown"
-                    
-                    # 기본 저장 구조
-                    doc = {
-                        "title": title,
-                        "link": link,
-                        "published": published_dt,
-                        "source": source_name,
-                        "lang": lang,
-                    }
-                    
-                    # 한국어 뉴스인 경우 추가 분석
-                    if lang == "ko":
-                        companies = extract_companies(title)
-                        if companies:
-                            doc.update({
-                                "companies": companies,
-                                "event": classify_event(title),
-                                "sentiment": sentiment_analyzer.analyze(title),
-                                "analyzed": True
-                            })
-                    
-                    db.news.insert_one(doc)
-                    print(f"✅ 새 뉴스 추가: {title}")
-                    
-            except Exception as e:
-                print(f"⚠️ {source_name} 피드 처리 중 오류: {str(e)}")
-                continue
+        logger.info("새로운 뉴스 수집 시작...")
+        news_collector = NaverNewsCollector()
+        news_collector.collect_news(db)
         
         # 1. 기업 정보가 있는 뉴스만 가져옴
         query = {"companies": {"$exists": True, "$ne": []}}
         if selected_sector:
             query["companies"] = {"$in": [c for c, s in SECTOR_MAP.items() if s == selected_sector]}
-        news = list(db.news.find(query).sort("published", -1).limit(50))  # 최근 50개로 제한
         
-        # 2. 키워드 필터링
+        # 세션 ID 생성 또는 가져오기
+        if 'session_id' not in session:
+            session['session_id'] = str(uuid.uuid4())
+        
+        # 30개의 뉴스 준비
+        prepared_news = prepare_news(query, limit=30)
+        
+        # 키워드 필터링
         if keyword:
-            news = [item for item in news if keyword in item["title"]]
+            prepared_news = [item for item in prepared_news if keyword in item["title"]]
         
-        # 3. 기업 정보가 없는 뉴스 중에서 한국어 뉴스를 가져와서 기업 정보 추출
-        if len(news) < 10:  # 기업 정보가 있는 뉴스가 10개 미만인 경우
-            # 더 많은 뉴스를 가져오도록 limit 증가
-            additional_news = list(db.news.find({
-                "lang": "ko",
-                "companies": {"$exists": False}  # companies 필드가 없는 경우
-            }).sort("published", -1).limit(50))
-            
-            for item in additional_news:
-                try:
-                    # 기업명 추출
-                    companies = extract_companies(item['title'])
-                    if companies:  # 기업명이 추출된 경우에만 추가
-                        item['companies'] = companies
-                        item['event'] = classify_event(item['title'])
-                        item['sentiment'] = sentiment_analyzer.analyze(item['title'])
-                        news.append(item)
-                        
-                        # DB에 업데이트
-                        db.news.update_one(
-                            {"_id": item['_id']},
-                            {"$set": {
-                                "companies": companies,
-                                "event": item['event'],
-                                "sentiment": item['sentiment'],
-                                "analyzed": True
-                            }}
-                        )
-                except Exception as e:
-                    print(f"[ERROR] 뉴스 분석 실패: {item['title']} - {str(e)}")
-                    continue
-                
-                # 10개 이상이면 중단
-                if len(news) >= 10:
-                    break
+        # 캐시에 저장
+        news_cache[session['session_id']] = {
+            'news': prepared_news,
+            'current_index': 0,
+            'query': query,
+            'last_accessed': datetime.now()
+        }
         
-        print(f"[DEBUG] 가져온 뉴스 수: {len(news)}")
-        print(f"[DEBUG] 전체 뉴스 수: {db.news.count_documents({})}")
-        print(f"[DEBUG] 한국어 뉴스 수: {db.news.count_documents({'lang': 'ko'})}")
-        print(f"[DEBUG] 기업 관련 뉴스 수: {db.news.count_documents({'companies': {'$exists': True, '$ne': []}})}")
-        
-        for n in news:
-            print(f"[DEBUG] 뉴스: {n['title']} | {n.get('lang', 'unknown')} | {n.get('companies', [])}")
-            
-        for item in news:
-            try:
-                item['_id'] = str(item['_id'])  # ObjectId를 문자열로 변환
-                # published를 KST로 변환
-                if item['published'].tzinfo is None:
-                    item['published'] = item['published'].replace(tzinfo=timezone(timedelta(hours=9)))
-                elif item['published'].tzinfo.utcoffset(item['published']) != timedelta(hours=9):
-                    item['published'] = item['published'].astimezone(timezone(timedelta(hours=9)))
-                # link 필드를 url로 매핑
-                item['url'] = item.get('link', '#')
-                # 경과시간 계산
-                item['elapsed_time'] = get_elapsed_time(item['published'])
-                # 감성분석 결과 추가
-                item['sentiment'] = item.get('sentiment', 'unknown')
-            except Exception as e:
-                print(f"[ERROR] 뉴스 데이터 처리 실패: {item.get('title', 'unknown')} - {str(e)}")
-                continue
-
-        return render_template("index.html", news=news, sectors=sectors, selected_sector=selected_sector, keyword=keyword)
+        return render_template('index.html', 
+                             news=prepared_news[:30],
+                             sectors=sectors,
+                             selected_sector=selected_sector,
+                             keyword=keyword)
     except Exception as e:
-        error_msg = f"페이지 로딩 중 오류 발생: {str(e)}"
-        print(f"[ERROR] {error_msg}")
-        return error_msg, 500
+        logger.error(f"인덱스 페이지 로딩 중 오류 발생: {str(e)}", exc_info=True)
+        return "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", 500
+
+@app.route("/load_more", methods=["POST"])
+def load_more():
+    try:
+        if 'session_id' not in session:
+            logger.warning("세션 ID가 없는 요청")
+            return jsonify({"status": "error", "message": "세션이 만료되었습니다"}), 400
+        
+        session_id = session['session_id']
+        if session_id not in news_cache:
+            logger.warning(f"캐시가 없는 세션 ID: {session_id}")
+            return jsonify({"status": "error", "message": "캐시가 만료되었습니다"}), 400
+        
+        cache = news_cache[session_id]
+        current_index = cache['current_index']
+        
+        # 마지막 접근 시간 업데이트
+        cache['last_accessed'] = datetime.now()
+        
+        # 다음 10개 뉴스 반환
+        next_news = cache['news'][current_index:current_index + 10]
+        cache['current_index'] += 10
+        
+        # 새로운 10개 뉴스 준비
+        if current_index + 10 >= len(cache['news']):
+            new_news = prepare_news(cache['query'], 
+                                  skip=len(cache['news']), 
+                                  limit=10)
+            if cache['keyword']:
+                new_news = [item for item in new_news if cache['keyword'] in item["title"]]
+            cache['news'].extend(new_news)
+        
+        return jsonify({
+            "status": "success",
+            "news": next_news,
+            "has_more": len(cache['news']) > cache['current_index']
+        })
+    except Exception as e:
+        logger.error(f"더보기 요청 처리 중 오류 발생: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
@@ -321,4 +323,4 @@ if __name__ == "__main__":
     threading.Thread(target=open_browser).start()
     
     # 서버 시작
-    app.run(host='0.0.0.0', port=8000, debug=True, use_reloader=False)
+    app.run(host='0.0.0.0', port=8000, debug=True, use_reloader=False) 
